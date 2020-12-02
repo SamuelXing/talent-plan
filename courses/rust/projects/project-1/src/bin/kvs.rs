@@ -2,8 +2,8 @@ extern crate kvs;
 use kvs::KvStore;
 
 use clap::{App, AppSettings, Arg, SubCommand};
-use std::process::exit;
 
+// checked: https://docs.rs/structopt/0.3.21/structopt/index.html
 fn main() {
     let mut kv_store = KvStore::new();
     let matches = App::new(env!("CARGO_PKG_NAME"))
@@ -34,11 +34,11 @@ fn main() {
                 .arg(Arg::with_name("KEY").help("A string key").required(true)),
         )
         .get_matches();
-    
+
     match matches.subcommand() {
         ("set", Some(_matches)) => {
             let key = _matches.value_of("KEY").unwrap();
-            let val =  _matches.value_of("VALUE").unwrap();
+            let val = _matches.value_of("VALUE").unwrap();
             kv_store.set(key.to_string(), val.to_string());
         }
         ("get", Some(_matches)) => {
