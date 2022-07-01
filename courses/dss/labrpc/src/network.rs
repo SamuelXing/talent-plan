@@ -279,7 +279,7 @@ async fn process_rpc(
 ) -> Result<Vec<u8>> {
     // Dispatch ===============================================================
     if let Some(delay) = delay {
-        Delay::new(Duration::from_secs(delay)).await;
+        Delay::new(Duration::from_millis(delay)).await;
     }
     // We has finished the delay, take it out to prevent polling
     // twice.
@@ -350,7 +350,7 @@ async fn server_dead(
 ) {
     loop {
         Delay::new(interval).await;
-        if net.is_server_dead(&client_name, &server_name, server_id) {
+        if net.is_server_dead(client_name, server_name, server_id) {
             debug!("{:?} is dead", server_name);
             return;
         }

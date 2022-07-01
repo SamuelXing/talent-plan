@@ -33,7 +33,7 @@ None. This course is a great introduction for your first day on GitHub.
 
 * [Introduction to GitHub](https://lab.github.com/githubtraining/introduction-to-github), an open source course created by [The GitHub Training Team](https://lab.github.com/githubtraining)
  
-**Suggested Assignments: **
+**Suggested Assignments:**
 
 * Finish the lab.
 
@@ -85,5 +85,5 @@ No assignments, the git skill will be tested all the time you participate in an 
 
 Special Thanks to:
 
-* `Producer Wen`, `Qinyao Yang`, and `Jason Zhangg`for testing this course and updating the materials.
+* `Producer Wen`, `Qinyao Yang`, and `Jason Zhang`for testing this course and updating the materials.
 * [The GitHub Training Team](https://lab.github.com/githubtraining) for creating open source courses above.
