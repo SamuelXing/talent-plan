@@ -1,13 +1,18 @@
-use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::{
+    fmt,
+    sync::{Arc, Mutex},
+};
 
-use futures::channel::mpsc::UnboundedSender;
-use futures::channel::oneshot;
-use futures::executor::ThreadPool;
-use futures::future::{self, FutureExt};
+use futures::{
+    channel::{mpsc::UnboundedSender, oneshot},
+    executor::ThreadPool,
+    future::{self, FutureExt},
+};
 
-use crate::error::{Error, Result};
-use crate::server::RpcFuture;
+use crate::{
+    error::{Error, Result},
+    server::RpcFuture,
+};
 
 pub struct Rpc {
     pub(crate) client_name: String,

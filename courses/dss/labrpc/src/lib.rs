@@ -7,21 +7,29 @@ mod macros;
 mod network;
 mod server;
 
-pub use self::client::{Client, Rpc, RpcHooks};
-pub use self::error::{Error, Result};
-pub use self::network::Network;
-pub use self::server::{Handler, HandlerFactory, RpcFuture, Server, ServerBuilder};
+pub use self::{
+    client::{Client, Rpc, RpcHooks},
+    error::{Error, Result},
+    network::Network,
+    server::{Handler, HandlerFactory, RpcFuture, Server, ServerBuilder},
+};
 
 #[cfg(test)]
 pub mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{mpsc, Arc, Mutex, Once};
-    use std::thread;
-    use std::time::{Duration, Instant};
+    use std::{
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc, Arc, Mutex, Once,
+        },
+        thread,
+        time::{Duration, Instant},
+    };
 
-    use futures::channel::oneshot::Canceled;
-    use futures::executor::{block_on, ThreadPool};
-    use futures::stream::StreamExt;
+    use futures::{
+        channel::oneshot::Canceled,
+        executor::{block_on, ThreadPool},
+        stream::StreamExt,
+    };
     use futures_timer::Delay;
     use prost_derive::Message;
 
@@ -73,12 +81,14 @@ pub mod tests {
                 x: format!("handler2-{}", args.x),
             })
         }
+
         async fn handler3(&self, args: JunkArgs) -> Result<JunkReply> {
             Delay::new(Duration::from_secs(20)).await;
             Ok(JunkReply {
                 x: format!("handler3-{}", -args.x),
             })
         }
+
         async fn handler4(&self, _: JunkArgs) -> Result<JunkReply> {
             Ok(JunkReply {
                 x: "pointer".to_owned(),
@@ -107,7 +117,7 @@ pub mod tests {
         let rsp = labcodec::decode(&buf).unwrap();
         assert_eq!(
             JunkReply {
-                x: "pointer".to_owned(),
+                x: "pointer".to_owned()
             },
             rsp,
         );
@@ -207,7 +217,7 @@ pub mod tests {
         let rsp = block_on(async { client.handler4(&JunkArgs::default()).await.unwrap() });
         assert_eq!(
             JunkReply {
-                x: "pointer".to_owned(),
+                x: "pointer".to_owned()
             },
             rsp,
         );
@@ -230,7 +240,7 @@ pub mod tests {
 
         assert_eq!(
             JunkReply {
-                x: "pointer".to_owned(),
+                x: "pointer".to_owned()
             },
             rsp,
         );
@@ -493,6 +503,7 @@ pub mod tests {
                 Ok(())
             }
         }
+
         fn after_dispatch(&self, _: &str, resp: Result<Vec<u8>>) -> Result<Vec<u8>> {
             if self.drop_resp.load(Ordering::Relaxed) {
                 Err(Error::Other("resphook".to_owned()))

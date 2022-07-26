@@ -2,12 +2,82 @@ syntax = "proto3";
 
 package raftpb;
 
+enum MessageType {
+    Append = 0;
+    AppendResponse = 1;
+    RequestVote = 2;
+    RequestVoteResponse = 3;
+    Snapshot = 4;
+    Heartbeat = 5;
+    HeartbeatResponse = 6;
+}
+
 // Example RequestVote RPC arguments structure.
 message RequestVoteArgs {
     // Your data here (2A, 2B).
+    MessageType msg_type = 1;
+    uint64 term = 2;
+    uint64 candidate_id = 3;
+    uint64 last_log_index = 4;
+    uint64 last_log_term = 5;
 }
 
 // Example RequestVote RPC reply structure.
 message RequestVoteReply {
     // Your data here (2A).
+    MessageType msg_type = 1;
+    uint64 term = 2;
+    bool vote_granted = 3;
+}
+
+// Log Entry
+message LogEntry {
+    bytes data = 1;
+    uint64 term = 2;
+    uint64 index = 3;
+}
+
+// AppendEntries Request
+message AppendEntriesArgs {
+    MessageType msg_type = 1;
+    uint64 term = 2;
+    uint64 leader_id = 3;
+    uint64 prev_log_index = 4;
+    uint64 prev_log_term = 5;
+    repeated LogEntry entries = 6;
+    uint64 leader_commit = 7;
+}
+
+// AppendEntries Response 
+message AppendEntriesReply {
+    MessageType msg_type = 1;
+    uint64 term = 2;
+    bool success = 3;
+    uint64 conflict_index = 4;
+    uint64 conflict_term = 5;
+}
+
+// InstallSnapshot Request
+message InstallSnapshotArgs {
+    MessageType msg_type = 1;
+    uint64 term = 2;
+    uint64 leader_id = 3;
+    uint64 last_included_index = 4;
+    uint64 last_included_term = 5;
+    uint64 offset = 6;
+    bytes data = 7;
+    bool done = 8;
+}
+
+// InstallSnapshot Reply
+message InstallSnapshotReply {
+    MessageType msg_type = 1;
+    uint64 term = 2;
+}
+
+// Persisted State 
+message PersistedState {
+    uint64 current_term = 1;
+    string voted_for = 2;
+    repeated LogEntry log = 3;
 }

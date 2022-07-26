@@ -1,21 +1,29 @@
-use std::collections::HashMap;
-use std::future::Future;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    future::Future,
+    sync::{
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
+};
 
-use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
-use futures::executor::ThreadPool;
-use futures::future::FutureExt;
-use futures::select;
-use futures::stream::StreamExt;
+use futures::{
+    channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender},
+    executor::ThreadPool,
+    future::FutureExt,
+    select,
+    stream::StreamExt,
+};
 use futures_timer::Delay;
 use log::{debug, error};
 use rand::{thread_rng, Rng};
 
-use crate::client::{Client, Rpc};
-use crate::error::{Error, Result};
-use crate::server::Server;
+use crate::{
+    client::{Client, Rpc},
+    error::{Error, Result},
+    server::Server,
+};
 
 #[derive(Debug)]
 struct EndInfo {

@@ -25,9 +25,9 @@ pub struct KvOutput {
 pub struct KvModel {}
 
 impl Model for KvModel {
-    type State = String;
     type Input = KvInput;
     type Output = KvOutput;
+    type State = String;
 
     fn partition(
         &self,
@@ -93,12 +93,13 @@ impl Model for KvModel {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::fs::File;
-    use std::io::{BufRead, BufReader, Result};
+    use std::{
+        collections::HashMap,
+        fs::File,
+        io::{BufRead, BufReader, Result},
+    };
 
-    use super::super::check_events;
-    use super::{KvInput, KvModel, KvOutput, Op};
+    use super::{super::check_events, KvInput, KvModel, KvOutput, Op};
     use crate::model::{Event, EventKind, Events, Model, Value};
     use regex::Regex;
 

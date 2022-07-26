@@ -1,10 +1,10 @@
-use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
-use crate::msg::*;
-use crate::service::*;
-use crate::*;
+use crate::{msg::*, service::*, *};
 
 // TTL is used for a lock key.
 // If the key's lifetime exceeds this value, it should be cleaned up.

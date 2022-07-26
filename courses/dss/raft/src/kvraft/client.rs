@@ -9,8 +9,7 @@ enum Op {
 
 pub struct Clerk {
     pub name: String,
-    pub servers: Vec<KvClient>,
-    // You will have to modify this struct.
+    pub servers: Vec<KvClient>, // You will have to modify this struct.
 }
 
 impl fmt::Debug for Clerk {
@@ -29,7 +28,6 @@ impl Clerk {
     /// fetch the current value for a key.
     /// returns "" if the key does not exist.
     /// keeps trying forever in the face of all other errors.
-    //
     // you can send an RPC with code like this:
     // if let Some(reply) = self.servers[i].get(args).wait() { /* do something */ }
     pub fn get(&self, key: String) -> String {
@@ -38,7 +36,6 @@ impl Clerk {
     }
 
     /// shared by Put and Append.
-    //
     // you can send an RPC with code like this:
     // let reply = self.servers[i].put_append(args).unwrap();
     fn put_append(&self, op: Op) {

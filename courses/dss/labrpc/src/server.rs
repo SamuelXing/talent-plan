@@ -1,7 +1,11 @@
-use std::collections::hash_map::{Entry, HashMap};
-use std::fmt;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::{
+    collections::hash_map::{Entry, HashMap},
+    fmt,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 use futures::future::{self, BoxFuture};
 

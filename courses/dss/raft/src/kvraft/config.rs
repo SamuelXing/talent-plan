@@ -1,16 +1,24 @@
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
+};
 
 use rand::seq::SliceRandom;
 
-use crate::kvraft::errors::{Error, Result};
-use crate::kvraft::{client, server};
-use crate::proto::kvraftpb::*;
-use crate::proto::raftpb::*;
-use crate::raft;
-use crate::raft::persister::*;
+use crate::{
+    kvraft::{
+        client,
+        errors::{Error, Result},
+        server,
+    },
+    proto::{kvraftpb::*, raftpb::*},
+    raft,
+    raft::persister::*,
+};
 
 static ID: AtomicUsize = AtomicUsize::new(300_000);
 

@@ -1,24 +1,24 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::task::Poll;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc, Arc, Mutex,
+    },
+    task::Poll,
+    thread,
+    time::{Duration, Instant},
+};
 
-use futures::channel::oneshot;
-use futures::executor::block_on;
-use futures::future;
-use futures::{Future, FutureExt};
+use futures::{channel::oneshot, executor::block_on, future, Future, FutureExt};
 use futures_timer::Delay;
 use rand::{seq::SliceRandom, Rng};
 
-use linearizability::check_operations_timeout;
-use linearizability::model::Operation;
-use linearizability::models::{KvInput, KvModel, KvOutput, Op};
+use linearizability::{
+    check_operations_timeout,
+    model::Operation,
+    models::{KvInput, KvModel, KvOutput, Op},
+};
 
-use crate::kvraft::client::Clerk;
-use crate::kvraft::config::Config;
+use crate::kvraft::{client::Clerk, config::Config};
 
 /// The tester generously allows solutions to complete elections in one second
 /// (much more than the paper's range of timeouts).
@@ -163,7 +163,7 @@ fn partitioner(
         while done.load(Ordering::Relaxed) == 0 {
             if !is_parked {
                 all.shuffle(&mut rng);
-                let offset = rng.gen_range(0, cfg.n);
+                let offset = rng.gen_range(0..cfg.n);
                 cfg.partition(&all[..offset], &all[offset..]);
                 sleep = Some(delay(rng.gen::<u64>()));
             }

@@ -33,23 +33,23 @@ mod tests {
         // /// A simple protobuf message.
         // #[derive(Clone, PartialEq, Message)]
         // pub struct Msg {
-        //     #[prost(enumeration="msg::Type", tag="1")]
-        //     pub type_: i32,
-        //     #[prost(uint64, tag="2")]
-        //     pub id: u64,
-        //     #[prost(string, tag="3")]
-        //     pub name: String,
-        //     #[prost(bytes, repeated, tag="4")]
-        //     pub paylad: ::std::vec::Vec<Vec<u8>>,
+        //   #[prost(enumeration = "msg::Type", tag = "1")]
+        //   pub type_:  i32,
+        //   #[prost(uint64, tag = "2")]
+        //   pub id:     u64,
+        //   #[prost(string, tag = "3")]
+        //   pub name:   String,
+        //   #[prost(bytes, repeated, tag = "4")]
+        //   pub paylad: ::std::vec::Vec<Vec<u8>>
         // }
         // pub mod msg {
-        //     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration)]
-        //     pub enum Type {
-        //         Unknown = 0,
-        //         Put = 1,
-        //         Get = 2,
-        //         Del = 3,
-        //     }
+        //   #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Enumeration)]
+        //   pub enum Type {
+        //     Unknown = 0,
+        //     Put = 1,
+        //     Get = 2,
+        //     Del = 3
+        //   }
         // }
         // ```
         include!(concat!(env!("OUT_DIR"), "/fixture.rs"));

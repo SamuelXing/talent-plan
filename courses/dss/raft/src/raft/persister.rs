@@ -18,12 +18,15 @@ impl<T: ?Sized + Persister> Persister for Box<T> {
     fn raft_state(&self) -> Vec<u8> {
         (**self).raft_state()
     }
+
     fn save_raft_state(&self, state: Vec<u8>) {
         (**self).save_raft_state(state)
     }
+
     fn save_state_and_snapshot(&self, state: Vec<u8>, snapshot: Vec<u8>) {
         (**self).save_state_and_snapshot(state, snapshot)
     }
+
     fn snapshot(&self) -> Vec<u8> {
         (**self).snapshot()
     }
@@ -33,12 +36,15 @@ impl<T: ?Sized + Sync + Persister> Persister for Arc<T> {
     fn raft_state(&self) -> Vec<u8> {
         (**self).raft_state()
     }
+
     fn save_raft_state(&self, state: Vec<u8>) {
         (**self).save_raft_state(state)
     }
+
     fn save_state_and_snapshot(&self, state: Vec<u8>, snapshot: Vec<u8>) {
         (**self).save_state_and_snapshot(state, snapshot)
     }
+
     fn snapshot(&self) -> Vec<u8> {
         (**self).snapshot()
     }

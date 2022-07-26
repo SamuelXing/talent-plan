@@ -1,14 +1,12 @@
 use futures::channel::mpsc::unbounded;
 
-use crate::proto::kvraftpb::*;
-use crate::raft;
+use crate::{proto::kvraftpb::*, raft};
 
 pub struct KvServer {
     pub rf: raft::Node,
     me: usize,
     // snapshot if log grows this big
-    maxraftstate: Option<usize>,
-    // Your definitions here.
+    maxraftstate: Option<usize>, // Your definitions here.
 }
 
 impl KvServer {
@@ -41,14 +39,18 @@ impl KvServer {
 // You can either drive the kv server by the rpc framework,
 //
 // ```rust
-// struct Node { server: Arc<Mutex<KvServer>> }
+// struct Node {
+//   server: Arc<Mutex<KvServer>>
+// }
 // ```
 //
 // or spawn a new thread runs the kv server and communicate via
 // a channel.
 //
 // ```rust
-// struct Node { sender: Sender<Msg> }
+// struct Node {
+//   sender: Sender<Msg>
+// }
 // ```
 #[derive(Clone)]
 pub struct Node {
@@ -76,12 +78,12 @@ impl Node {
 
     /// The current term of this peer.
     pub fn term(&self) -> u64 {
-        self.get_state().term()
+        self.get_state().current_term
     }
 
     /// Whether this peer believes it is the leader.
     pub fn is_leader(&self) -> bool {
-        self.get_state().is_leader()
+        true
     }
 
     pub fn get_state(&self) -> raft::State {

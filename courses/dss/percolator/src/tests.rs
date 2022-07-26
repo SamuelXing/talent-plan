@@ -1,16 +1,20 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+    time::Duration,
 };
-use std::thread;
-use std::time::Duration;
 
 use labrpc::*;
 use prost::Message;
 
-use crate::client::Client;
-use crate::server::{MemoryStorage, TimestampOracle};
-use crate::service::{add_transaction_service, add_tso_service, TSOClient, TransactionClient};
+use crate::{
+    client::Client,
+    server::{MemoryStorage, TimestampOracle},
+    service::{add_transaction_service, add_tso_service, TSOClient, TransactionClient},
+};
 
 struct CommitHooks {
     drop_req: AtomicBool,
@@ -29,6 +33,7 @@ impl RpcHooks for CommitHooks {
         }
         Ok(())
     }
+
     fn after_dispatch(&self, fq_name: &str, resp: Result<Vec<u8>>) -> Result<Vec<u8>> {
         if self.drop_resp.load(Ordering::Relaxed) && fq_name == "transaction.commit" {
             return Err(Error::Other("resphook".to_owned()));

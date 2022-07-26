@@ -5,7 +5,7 @@ use crate::service::{TSOClient, TransactionClient};
 // BACKOFF_TIME_MS is the wait time before retrying to send the request.
 // It should be exponential growth. e.g.
 //|  retry time  |  backoff time  |
-//|--------------|----------------|
+//| --------------|----------------|
 //|      1       |       100      |
 //|      2       |       200      |
 //|      3       |       400      |

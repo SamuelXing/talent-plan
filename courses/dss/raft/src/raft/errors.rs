@@ -6,6 +6,8 @@ pub enum Error {
     Decode(labcodec::DecodeError),
     Rpc(labrpc::Error),
     NotLeader,
+    LogCompacted,
+    InvalidIndex,
 }
 
 impl fmt::Display for Error {
@@ -21,6 +23,19 @@ impl error::Error for Error {
             Error::Decode(ref e) => Some(e),
             Error::Rpc(ref e) => Some(e),
             _ => None,
+        }
+    }
+}
+
+impl From<Error> for labrpc::Error {
+    fn from(err: Error) -> labrpc::Error {
+        match err {
+            Error::Encode(e) => labrpc::Error::Encode(e),
+            Error::Decode(e) => labrpc::Error::Decode(e),
+            Error::Rpc(e) => e,
+            Error::NotLeader => labrpc::Error::Other("NotLeader".to_string()),
+            Error::LogCompacted => labrpc::Error::Other("LogCompacted".to_string()),
+            Error::InvalidIndex => labrpc::Error::Other("InvalidIndex".to_string()),
         }
     }
 }

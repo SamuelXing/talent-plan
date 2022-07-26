@@ -2,18 +2,24 @@ mod bitset;
 pub mod model;
 pub mod models;
 
-use std::cell::{Ref, RefCell};
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
-use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
+use std::{
+    cell::{Ref, RefCell},
+    collections::HashMap,
+    fmt::Debug,
+    rc::Rc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc::{channel, Receiver, RecvTimeoutError},
+        Arc,
+    },
+    thread,
+    time::Duration,
+};
 
-use crate::bitset::Bitset;
-use crate::model::{Event, EventKind, Events, Model, Operations, Value};
+use crate::{
+    bitset::Bitset,
+    model::{Event, EventKind, Events, Model, Operations, Value},
+};
 
 enum EntryKind {
     CallEntry,

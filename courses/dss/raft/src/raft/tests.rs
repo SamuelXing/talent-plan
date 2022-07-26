@@ -1,18 +1,22 @@
 #![allow(clippy::identity_op)]
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{channel, Sender};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc::{channel, Sender},
+        Arc, Mutex,
+    },
+    thread,
+    time::Duration,
+};
 
-use futures::channel::oneshot;
-use futures::executor::block_on;
-use futures::future;
+use futures::{channel::oneshot, executor::block_on, future};
 use rand::{rngs::ThreadRng, Rng};
 
-use crate::raft::config::{Config, Entry, Storage, SNAPSHOT_INTERVAL};
-use crate::raft::Node;
+use crate::raft::{
+    config::{Config, Entry, Storage, SNAPSHOT_INTERVAL},
+    Node,
+};
 
 /// The tester generously allows solutions to complete elections in one second
 /// (much more than the paper's range of timeouts).
@@ -50,6 +54,7 @@ fn test_initial_election_2a() {
     cfg.check_one_leader();
 
     cfg.end();
+    info!("end test_initial_election_2a");
 }
 
 #[test]
@@ -60,6 +65,7 @@ fn test_reelection_2a() {
 
     let leader1 = cfg.check_one_leader();
     // if the leader disconnects, a new one should be elected.
+    info!("Disconnect({})", leader1);
     cfg.disconnect(leader1);
     cfg.check_one_leader();
 
@@ -84,6 +90,7 @@ fn test_reelection_2a() {
     cfg.check_one_leader();
 
     cfg.end();
+    info!("end test_reelection_2a");
 }
 
 #[test]
@@ -118,6 +125,7 @@ fn test_many_election_2a() {
     cfg.check_one_leader();
 
     cfg.end();
+    info!("end test_many_election_2a");
 }
 
 #[test]
@@ -284,7 +292,10 @@ fn test_concurrent_starts_2b() {
         });
 
         for j in 0..servers {
-            let t = cfg.rafts.lock().unwrap()[j].as_ref().unwrap().term();
+            let t = cfg.rafts.lock().unwrap()[j]
+                .as_ref()
+                .unwrap()
+                .get_current_term();
             if t != term {
                 // term changed -- can't expect low RPC counts
                 continue 'outer;
@@ -537,7 +548,10 @@ fn test_count_2b() {
         let mut failed = false;
         total2 = 0;
         for j in 0..SERVERS {
-            let t = cfg.rafts.lock().unwrap()[j].as_ref().unwrap().term();
+            let t = cfg.rafts.lock().unwrap()[j]
+                .as_ref()
+                .unwrap()
+                .get_current_term();
             if t != term {
                 // term changed -- can't expect low RPC counts
                 // need to keep going to update total2

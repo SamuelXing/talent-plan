@@ -1,17 +1,17 @@
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+    thread,
+    time::{Duration, Instant},
+};
 
-use futures::channel::mpsc::unbounded;
-use futures::future;
-use futures::stream::StreamExt;
+use futures::{channel::mpsc::unbounded, future, stream::StreamExt};
 use rand::Rng;
 
-use crate::proto::raftpb::*;
-use crate::raft;
-use crate::raft::persister::*;
+use crate::{proto::raftpb::*, raft, raft::persister::*};
 
 pub const SNAPSHOT_INTERVAL: u64 = 10;
 
@@ -160,23 +160,26 @@ impl Config {
         let mut leaders = HashMap::new();
         for _iters in 0..10 {
             let ms = 450 + (random.gen::<u64>() % 100);
+            info!(
+                "check one leader in iter: {:?} with sleep: {:?}",
+                _iters, ms
+            );
             thread::sleep(Duration::from_millis(ms));
 
+            // info!("b1");
             for (i, connected) in self.connected.iter().enumerate() {
                 if *connected {
-                    let state = self.rafts.lock().unwrap()[i]
+                    let term = self.rafts.lock().unwrap()[i]
                         .as_ref()
                         .unwrap()
-                        .get_state()
-                        .clone();
-                    let term = state.term();
-                    let is_leader = state.is_leader();
+                        .get_current_term();
+                    let is_leader = self.rafts.lock().unwrap()[i].as_ref().unwrap().is_leader();
                     if is_leader {
                         leaders.entry(term).or_insert_with(Vec::new).push(i);
                     }
                 }
             }
-
+            // info!("b2");
             let mut last_term_with_leader = 0;
             for (term, leaders) in &leaders {
                 if leaders.len() > 1 {
@@ -188,6 +191,7 @@ impl Config {
             }
 
             if !leaders.is_empty() {
+                // info!("found leader: {:?}", leaders[&last_term_with_leader][0]);
                 return leaders[&last_term_with_leader][0];
             }
         }
@@ -200,7 +204,11 @@ impl Config {
         let mut term = 0;
         for (i, connected) in self.connected.iter().enumerate() {
             if *connected {
-                let xterm = self.rafts.lock().unwrap()[i].as_ref().unwrap().term();
+                let xterm = self.rafts.lock().unwrap()[i]
+                    .as_ref()
+                    .unwrap()
+                    .get_current_term();
+
                 if term == 0 {
                     term = xterm;
                 } else if term != xterm {
@@ -252,7 +260,7 @@ impl Config {
             if let Some(start_term) = start_term {
                 let rafts = self.rafts.lock().unwrap();
                 for r in rafts.iter().flatten() {
-                    let term = r.term();
+                    let term = r.get_current_term();
                     if term > start_term {
                         // someone has moved on
                         // can no longer guarantee that we'll "win"
