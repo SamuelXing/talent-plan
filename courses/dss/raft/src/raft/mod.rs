@@ -86,6 +86,7 @@ impl fmt::Debug for Event {
     }
 }
 
+// TODO: using protobuf LogEntry 
 /// LogEntry is a state machine transition along with some metadata needed for
 /// Raft.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
@@ -397,11 +398,43 @@ impl Raft {
         self.persister
             .save_state_and_snapshot(self.encode_state(), snapshot.to_vec());
     }
+    
+    fn check_and_update_commit_index(&mut self) {
+        // If there exists an N such that N > commitIndex, a majority of matchIndex[i] >= N,
+        // and log[N].term == currentTerm: set commitIndex = N (§5.3, §5.4).
+        let mut match_index = self.state.match_index.clone();
+        match_index.sort();
+        let majority = self.peers.len() - self.peers.len() / 2;
+        let commit_index = match_index[majority];
+        if self.state.log[commit_index].term != self.state.current_term {
+            return;
+        }
+        self.update_commit_index(commit_index);
+    }
+
+    fn update_commit_index(&mut self, commit_index: usize) {
+        if commit_index > self.state.commit_index {
+            self.state.commit_index = commit_index;
+            info!("{:?} commit to index {}", self, commit_index);
+        }
+        // If commitIndex > lastApplied: increment lastApplied,
+        // apply log[lastApplied] to state machine (§5.3)
+        for i in self.state.last_applied + 1..=commit_index {
+            self.apply_ch
+                .unbounded_send(ApplyMsg::Command {
+                    data: self.state.log[i].data.clone(),
+                    index: i as u64,
+                })
+                .unwrap();
+        }
+        self.state.last_applied = commit_index;
+    }
+
 }
+
 // Raft Shared State between threads
 pub struct SharedRaft {
     raft: Mutex<Raft>,
-    log_applier: Notify,
     convert2follower: Notify,
     events_emitter: Sender<Event>,
 }
@@ -417,7 +450,6 @@ impl SharedRaft {
     fn new(raft: Raft, events_emitter: Sender<Event>) -> SharedRaft {
         SharedRaft {
             raft: Mutex::new(raft),
-            log_applier: Notify::new(),
             convert2follower: Notify::new(),
             events_emitter,
         }
@@ -516,13 +548,21 @@ impl SharedRaft {
 
     // searching for the last index at given term, return None if term is not found
     fn find_last_index_at_term(&self, end: usize, term: u64) -> Option<usize> {
+        if term == 0 {
+            return None;
+        }
         let state = &self.raft.lock().unwrap().state;
         for index in (state.index_offset..end).rev() {
-            if state.log[index - state.index_offset].term == term {
+            if state.log[index - state.index_offset].term == term && index != 0{
                 return Some(index);
             }
         }
         None
+    }
+
+    fn set_next_index(&self, peer_id: usize, index: usize) {
+        let state = &mut self.raft.lock().unwrap().state;
+        state.next_index[peer_id] = index;
     }
 
     /// discard the entries follow the index in the log
@@ -541,18 +581,6 @@ impl SharedRaft {
     fn get_commit_index(&self) -> usize {
         let commit_index = self.raft.lock().unwrap().state.commit_index;
         commit_index
-    }
-
-    // get the index of last applied log entry
-    fn get_last_applied(&self) -> usize {
-        let last_applied = self.raft.lock().unwrap().state.last_applied;
-        last_applied
-    }
-
-    // set the commit_index
-    fn set_commit_index(&self, commit_index: usize) {
-        let mut raft = self.raft.lock().unwrap();
-        raft.state.commit_index = commit_index;
     }
 
     fn get_self_id(&self) -> u64 {
@@ -585,7 +613,7 @@ impl SharedRaft {
         assert!(new_term >= raft.state.current_term);
 
         info!(
-            "{:?} {} => t={},r={:?},l={:?}",
+            "{:?} {} => t={},r={:?},L={:?}",
             raft,
             reason,
             new_term,
@@ -621,7 +649,14 @@ impl SharedRaft {
 
     fn broadcast_request_vote(&self) {
         let me = self.get_self_id();
-
+        let args = RequestVoteArgs {
+            msg_type: MessageType::RequestVote as i32,
+            term: self.get_current_term(),
+            candidate_id: me,
+            last_log_index: self.get_last_log_index() as u64,
+            last_log_term: self.get_last_log_term(),
+        };
+        debug!("{:?} -> {:?}", self, args);
         for peer_id in 0..self.get_peers_len() {
             // skip self
             if peer_id as u64 == me {
@@ -630,33 +665,25 @@ impl SharedRaft {
             let peer = self.get_peer_by_id(peer_id);
             let peer_clone = peer.clone();
             let events_emitter = self.events_emitter.clone();
-            let args = RequestVoteArgs {
-                msg_type: MessageType::RequestVote as i32,
-                term: self.get_current_term(),
-                candidate_id: me,
-                last_log_index: self.get_last_log_index() as u64,
-                last_log_term: self.get_last_log_term(),
-            };
-            debug!("{:?} ->{} {:?}", self, peer_id, args);
-            // call request_vote rpc in async
+            let args_clone = args.clone();
             peer.spawn(async move {
-                let res = peer_clone.request_vote(&args).await.map_err(Error::Rpc);
+                let res = peer_clone.request_vote(&args_clone).await.map_err(Error::Rpc);
                 let _ = events_emitter.send(Event::RecvRequestVoteResp(peer_id, res));
             });
         }
     }
 
-    fn broadcast_append_entries(&self, heartbeat: bool) {
+    fn broadcast_append_entries(&self) {
         for peer_id in 0..self.get_peers_len() {
             // skip self
             if peer_id as u64 == self.get_self_id() {
                 continue;
             }
-            self.append_entries_to_single_peer(peer_id, heartbeat);
+            self.append_entries_to_single_peer(peer_id);
         }
     }
 
-    fn append_entries_to_single_peer(&self, peer_id: usize, heartbeat: bool) {
+    fn append_entries_to_single_peer(&self, peer_id: usize) {
         let prev_log_index = {
             let state = &self.raft.lock().unwrap().state;
             state.next_index[peer_id] - 1
@@ -666,7 +693,6 @@ impl SharedRaft {
             Ok(prev_log_term) => {
                 let args = self.prepare_append_entries_args(
                     peer_id,
-                    heartbeat,
                     prev_log_index as u64,
                     prev_log_term,
                 );
@@ -684,46 +710,81 @@ impl SharedRaft {
         }
     }
 
+    // fn prepare_append_entries_args(
+    //     &self,
+    //     peer_id: usize,
+    //     heartbeat: bool,
+    //     prev_log_index: u64,
+    //     prev_log_term: u64,
+    // ) -> AppendEntriesArgs {
+    //     let raft = &self.raft.lock().unwrap();
+    //     let state = &raft.state;
+
+    //     // heartbeat: AppendEntries RPCs that carry no log entries
+    //     if heartbeat {
+    //         AppendEntriesArgs {
+    //             msg_type: MessageType::Heartbeat as i32,
+    //             term: state.current_term,
+    //             leader_id: raft.me as u64,
+    //             prev_log_index: 0,
+    //             prev_log_term: 0,
+    //             entries: Vec::new(),
+    //             leader_commit: state.commit_index as u64,
+    //         }
+    //     } else {
+    //         let (entries, msg_type) = 
+    //         (
+    //             state.log[state.next_index[peer_id as usize] - state.index_offset..state.log.len()]
+    //                 .iter()
+    //                 .cloned()
+    //                 .map(Into::into)
+    //                 .collect(),
+    //             MessageType::Append as i32,
+    //         );
+    //         AppendEntriesArgs {
+    //             msg_type,
+    //             term: state.current_term,
+    //             leader_id: raft.me as u64,
+    //             prev_log_index,
+    //             prev_log_term,
+    //             entries,
+    //             leader_commit: state.commit_index as u64,
+    //         }
+    //     }
+    // }
+
     fn prepare_append_entries_args(
         &self,
         peer_id: usize,
-        heartbeat: bool,
         prev_log_index: u64,
         prev_log_term: u64,
     ) -> AppendEntriesArgs {
         let raft = &self.raft.lock().unwrap();
         let state = &raft.state;
 
-        // heartbeat: AppendEntries RPCs that carry no log entries
-        let (entries, msg_type) = if heartbeat {
-            (Vec::new(), MessageType::Heartbeat as i32)
-        } else {
-            (
-                state.log[state.next_index[peer_id as usize] - state.index_offset..state.log.len()]
+
+            let entries = state.log[state.next_index[peer_id as usize] - state.index_offset..state.log.len()]
                     .iter()
                     .cloned()
                     .map(Into::into)
-                    .collect(),
-                MessageType::Append as i32,
-            )
-        };
-
-        AppendEntriesArgs {
-            msg_type,
-            term: state.current_term,
-            leader_id: raft.me as u64,
-            prev_log_index,
-            prev_log_term,
-            entries,
-            leader_commit: state.commit_index as u64,
-        }
+                    .collect::<Vec<crate::proto::raftpb::LogEntry>>();
+            let msg_type = if entries.is_empty() { MessageType::Heartbeat } else { MessageType::Append };
+            AppendEntriesArgs {
+                msg_type: msg_type as i32,
+                term: state.current_term,
+                leader_id: raft.me as u64,
+                prev_log_index,
+                prev_log_term,
+                entries,
+                leader_commit: state.commit_index as u64,
+            }
+        
     }
 
     fn send_append_entries(&self, peer_id: usize, args: AppendEntriesArgs) {
         let peer = self.get_peer_by_id(peer_id);
         let peer_clone = peer.clone();
         let events_emitter = self.events_emitter.clone();
-        // call append_entries rpc in async
         peer.spawn(async move {
             let response = peer_clone.append_entries(&args).await.map_err(Error::Rpc);
             let _ = events_emitter.send(Event::RecvAppendEntriesResp(
@@ -760,49 +821,25 @@ impl SharedRaft {
                 let last_log_index = args.prev_log_index as usize + args.entries.len();
                 state.next_index[peer_id] = last_log_index + 1;
                 state.match_index[peer_id] = last_log_index;
-
-                // If there exists an N such that N > commitIndex, a majority
-                // of matchIndex[i] ≥ N, and log[N].term == currentTerm:
-                // set commitIndex = N.
-                let mut n = state.log.len() - 1 + state.index_offset;
-                while n > state.commit_index {
-                    let num_replications = state.match_index.iter().fold(0, |acc, mtch_idx| {
-                        if mtch_idx >= &n {
-                            acc + 1
-                        } else {
-                            acc
-                        }
-                    });
-
-                    if num_replications * 2 >= raft.peers.len()
-                        && state.log[n - state.index_offset].term == state.current_term
-                    {
-                        state.commit_index = n;
-                        break;
-                    }
-                    n -= 1;
-                }
-
-                // notify that commit_index can_update, maybe it's time to apply log
-                self.log_applier.notify_one();
+                raft.check_and_update_commit_index();
             } else {
                 // Original log backtracking: If AppendEntries fails because of log inconsistency: decrement nextIndex and retry
                 // Accelerated log backtracking: https://thesquareplanet.com/blog/students-guide-to-raft/#an-aside-on-optimizations
-                let state = &mut self.raft.lock().unwrap().state;
+
                 // Upon receiving a conflict response, the leader should first search its log for conflictTerm.
                 // If it finds an entry in its log with that term,
                 // it should set nextIndex to be the one beyond the index of the last entry in that term in its log.
                 if let Some(conflict_index) = self
                     .find_last_index_at_term(args.prev_log_index as usize, response.conflict_term)
                 {
-                    state.next_index[peer_id as usize] = conflict_index;
+                    self.set_next_index(peer_id as usize, conflict_index);
                 } else {
                     // If it does not find an entry with that term, it should set nextIndex = conflictIndex.
-                    state.next_index[peer_id as usize] = response.conflict_index as usize;
+                    self.set_next_index(peer_id as usize, response.conflict_index as usize);
                 }
-
+                
                 // retry
-                let _ = self.events_emitter.send(Event::SendEntries(peer_id));
+                let _ok = self.events_emitter.send(Event::SendEntries(peer_id));
             }
         }
     }
@@ -877,7 +914,7 @@ impl SharedRaft {
         assert_eq!(self.get_role(), Role::Candidate);
         // Reset election timer
         self.update_next_election_deadline();
-
+        
         // Send RequestVote RPCs to all other servers
         self.broadcast_request_vote();
 
@@ -904,7 +941,7 @@ impl SharedRaft {
                 }
                 // If votes received from majority of servers: become leader
                 if vote_count >= (self.get_peers_len() + 1)/2 {
-                    self.update_role(Role::Leader, self.get_current_term(), self.get_voted_for(), "win election");
+                    self.update_role(Role::Leader, self.get_current_term(), Some(self.get_self_id()), "win election");
                     break 'candidate;
                 }
               },
@@ -916,7 +953,7 @@ impl SharedRaft {
               },
               // If AppendEntries RPC received from new leader: convert to follower
               _ = self.convert2follower.notified() => break 'candidate,
-              else => break 'candidate,
+              else => continue,
             }
         }
     }
@@ -929,17 +966,17 @@ impl SharedRaft {
         // Upon election: send initial empty AppendEntries RPCs
         // (heartbeat) to each server; repeat during idle periods to
         // prevent election timeouts
-        self.broadcast_append_entries(true);
+        self.broadcast_append_entries();
 
         let mut heartbeat = time::interval(HEARTBEAT_TIMEOUT);
         while self.is_leader() && !self.is_killed() {
             tokio::select! {
-                _ = heartbeat.tick() => { self.broadcast_append_entries(true) }
+                _ = heartbeat.tick() => { self.broadcast_append_entries() }
                 Some(event) = events_listener.recv() => {
                     match event {
-                        Event::BroadcastEntries => self.broadcast_append_entries(false),
+                        Event::BroadcastEntries => self.broadcast_append_entries(),
                         Event::SendEntries(peer_id) => {
-                            self.append_entries_to_single_peer(peer_id, false)
+                            self.append_entries_to_single_peer(peer_id)
                         },
                         Event::RecvAppendEntriesResp(peer_id, args, response) => {
                             self.handle_append_entries_response(peer_id, args, response);
@@ -951,7 +988,7 @@ impl SharedRaft {
                     }
                 },
                 _ = self.convert2follower.notified() => break,
-                else => break,
+                else => continue,
             };
         }
     }
@@ -969,7 +1006,7 @@ impl Node {
         let shared = Arc::new(SharedRaft::new(raft, events_emitter));
 
         RUNTIME.spawn(handle_current_state(shared.clone(), events_listener));
-        RUNTIME.spawn(handle_apply_log(shared.clone()));
+        // RUNTIME.spawn(handle_apply_log(shared.clone()));
 
         info!("Node {} created.", shared.get_self_id());
         Node { shared }
@@ -1096,6 +1133,7 @@ impl RaftService for Node {
         })
     }
 
+    // TODO: remove shared
     async fn append_entries(&self, args: AppendEntriesArgs) -> labrpc::Result<AppendEntriesReply> {
         // notify backgroung task that an append_entries rpc arrived, for Heartbeat
         let _ = self.shared.events_emitter.send(Event::RecvAppendEntriesReq);
@@ -1132,7 +1170,7 @@ impl RaftService for Node {
         // If a follower does not have prevLogIndex in its log,
         // it should return with conflictIndex = len(log) and conflictTerm = None.
         if args.prev_log_index > shared.get_last_log_index() as u64 {
-            debug!("{:?} <- deny(index mismatch) {:?}", shared, args);
+            debug!("{:?} <- deny(lost index) {:?}", shared, args);
             return Ok(AppendEntriesReply {
                 msg_type: MessageType::AppendResponse as i32,
                 term: current_term,
@@ -1179,12 +1217,12 @@ impl RaftService for Node {
 
         // If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
         if args.leader_commit > shared.get_commit_index() as u64 {
-            shared.set_commit_index(std::cmp::min(
+            let last_log_index = shared.get_last_log_index();
+            let raft = &mut shared.raft.lock().unwrap();
+            raft.update_commit_index(std::cmp::min(
                 args.leader_commit as usize,
-                shared.get_last_log_index(),
+                last_log_index
             ));
-            // notify that commit_index can_update, maybe it's time to apply log
-            shared.log_applier.notify_one();
         }
         debug!("{:?} <- accept {:?}", shared, args);
         Ok(AppendEntriesReply {
@@ -1201,7 +1239,7 @@ impl RaftService for Node {
         args: InstallSnapshotArgs,
     ) -> labrpc::Result<InstallSnapshotReply> {
         debug!("{:?} <- {:?}", self.shared, args);
-        // notify backgroung task that an append_entries rpc arrived, for Heartbeat
+        // notify backgroung task that an install_snapshot rpc arrived, for Heartbeat
         let _ = self.shared.events_emitter.send(Event::RecvAppendEntriesReq);
 
         let current_term = self.shared.get_current_term();
@@ -1288,19 +1326,3 @@ async fn handle_current_state(shared: Arc<SharedRaft>, mut events_listener: Rece
     }
 }
 
-// background task to apply a log entry to application layer if it's ready
-async fn handle_apply_log(shared: Arc<SharedRaft>) {
-    while !shared.is_killed() {
-        if shared.get_commit_index() > shared.get_last_applied() {
-            let mut raft = shared.raft.lock().unwrap();
-            raft.state.last_applied += 1;
-            info!("{:?} commit to index {}", raft, raft.state.last_applied);
-            let _ = raft.apply_ch.unbounded_send(ApplyMsg::Command {
-                data: raft.state.log[raft.state.last_applied].data.clone(),
-                index: raft.state.last_applied as u64,
-            });
-        } else {
-            shared.log_applier.notified().await;
-        }
-    }
-}
