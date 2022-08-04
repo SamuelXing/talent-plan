@@ -86,7 +86,7 @@ impl fmt::Debug for Event {
     }
 }
 
-// TODO: using protobuf LogEntry 
+// TODO: using protobuf LogEntry
 /// LogEntry is a state machine transition along with some metadata needed for
 /// Raft.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd)]
@@ -398,7 +398,7 @@ impl Raft {
         self.persister
             .save_state_and_snapshot(self.encode_state(), snapshot.to_vec());
     }
-    
+
     fn check_and_update_commit_index(&mut self) {
         // If there exists an N such that N > commitIndex, a majority of matchIndex[i] >= N,
         // and log[N].term == currentTerm: set commitIndex = N (§5.3, §5.4).
@@ -429,7 +429,6 @@ impl Raft {
         }
         self.state.last_applied = commit_index;
     }
-
 }
 
 // Raft Shared State between threads
@@ -553,7 +552,7 @@ impl SharedRaft {
         }
         let state = &self.raft.lock().unwrap().state;
         for index in (state.index_offset..end).rev() {
-            if state.log[index - state.index_offset].term == term && index != 0{
+            if state.log[index - state.index_offset].term == term && index != 0 {
                 return Some(index);
             }
         }
@@ -667,7 +666,10 @@ impl SharedRaft {
             let events_emitter = self.events_emitter.clone();
             let args_clone = args.clone();
             peer.spawn(async move {
-                let res = peer_clone.request_vote(&args_clone).await.map_err(Error::Rpc);
+                let res = peer_clone
+                    .request_vote(&args_clone)
+                    .await
+                    .map_err(Error::Rpc);
                 let _ = events_emitter.send(Event::RecvRequestVoteResp(peer_id, res));
             });
         }
@@ -691,11 +693,8 @@ impl SharedRaft {
 
         match self.get_term_at_index(prev_log_index) {
             Ok(prev_log_term) => {
-                let args = self.prepare_append_entries_args(
-                    peer_id,
-                    prev_log_index as u64,
-                    prev_log_term,
-                );
+                let args =
+                    self.prepare_append_entries_args(peer_id, prev_log_index as u64, prev_log_term);
 
                 debug!("{:?} ->{} {:?}", self, peer_id, args);
                 self.send_append_entries(peer_id, args);
@@ -710,49 +709,6 @@ impl SharedRaft {
         }
     }
 
-    // fn prepare_append_entries_args(
-    //     &self,
-    //     peer_id: usize,
-    //     heartbeat: bool,
-    //     prev_log_index: u64,
-    //     prev_log_term: u64,
-    // ) -> AppendEntriesArgs {
-    //     let raft = &self.raft.lock().unwrap();
-    //     let state = &raft.state;
-
-    //     // heartbeat: AppendEntries RPCs that carry no log entries
-    //     if heartbeat {
-    //         AppendEntriesArgs {
-    //             msg_type: MessageType::Heartbeat as i32,
-    //             term: state.current_term,
-    //             leader_id: raft.me as u64,
-    //             prev_log_index: 0,
-    //             prev_log_term: 0,
-    //             entries: Vec::new(),
-    //             leader_commit: state.commit_index as u64,
-    //         }
-    //     } else {
-    //         let (entries, msg_type) = 
-    //         (
-    //             state.log[state.next_index[peer_id as usize] - state.index_offset..state.log.len()]
-    //                 .iter()
-    //                 .cloned()
-    //                 .map(Into::into)
-    //                 .collect(),
-    //             MessageType::Append as i32,
-    //         );
-    //         AppendEntriesArgs {
-    //             msg_type,
-    //             term: state.current_term,
-    //             leader_id: raft.me as u64,
-    //             prev_log_index,
-    //             prev_log_term,
-    //             entries,
-    //             leader_commit: state.commit_index as u64,
-    //         }
-    //     }
-    // }
-
     fn prepare_append_entries_args(
         &self,
         peer_id: usize,
@@ -762,23 +718,26 @@ impl SharedRaft {
         let raft = &self.raft.lock().unwrap();
         let state = &raft.state;
 
-
-            let entries = state.log[state.next_index[peer_id as usize] - state.index_offset..state.log.len()]
-                    .iter()
-                    .cloned()
-                    .map(Into::into)
-                    .collect::<Vec<crate::proto::raftpb::LogEntry>>();
-            let msg_type = if entries.is_empty() { MessageType::Heartbeat } else { MessageType::Append };
-            AppendEntriesArgs {
-                msg_type: msg_type as i32,
-                term: state.current_term,
-                leader_id: raft.me as u64,
-                prev_log_index,
-                prev_log_term,
-                entries,
-                leader_commit: state.commit_index as u64,
-            }
-        
+        let entries = state.log
+            [state.next_index[peer_id as usize] - state.index_offset..state.log.len()]
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect::<Vec<crate::proto::raftpb::LogEntry>>();
+        let msg_type = if entries.is_empty() {
+            MessageType::Heartbeat
+        } else {
+            MessageType::Append
+        };
+        AppendEntriesArgs {
+            msg_type: msg_type as i32,
+            term: state.current_term,
+            leader_id: raft.me as u64,
+            prev_log_index,
+            prev_log_term,
+            entries,
+            leader_commit: state.commit_index as u64,
+        }
     }
 
     fn send_append_entries(&self, peer_id: usize, args: AppendEntriesArgs) {
@@ -837,7 +796,7 @@ impl SharedRaft {
                     // If it does not find an entry with that term, it should set nextIndex = conflictIndex.
                     self.set_next_index(peer_id as usize, response.conflict_index as usize);
                 }
-                
+
                 // retry
                 let _ok = self.events_emitter.send(Event::SendEntries(peer_id));
             }
@@ -914,7 +873,7 @@ impl SharedRaft {
         assert_eq!(self.get_role(), Role::Candidate);
         // Reset election timer
         self.update_next_election_deadline();
-        
+
         // Send RequestVote RPCs to all other servers
         self.broadcast_request_vote();
 
@@ -1108,8 +1067,14 @@ impl RaftService for Node {
         // least as up-to-date as receiver’s log, grant vote
         let voted_for = self.shared.get_voted_for();
         let can_vote = voted_for == None || voted_for == Some(args.candidate_id);
-        let log_is_up2date = self.shared.get_last_log_index() as u64 <= args.last_log_index
-            && self.shared.get_last_log_term() as u64 <= args.last_log_term;
+        // log is up-to-date, if:
+        // request arg has a higher term, or;
+        // if term is equal, request arg has a higher index;
+        let log_is_up2date = (args.last_log_term, args.last_log_index)
+            >= (
+                self.shared.get_last_log_term() as u64,
+                self.shared.get_last_log_index() as u64,
+            );
         let vote_granted = if can_vote && log_is_up2date {
             self.shared.set_voted_for(Some(args.candidate_id));
             true
@@ -1219,10 +1184,7 @@ impl RaftService for Node {
         if args.leader_commit > shared.get_commit_index() as u64 {
             let last_log_index = shared.get_last_log_index();
             let raft = &mut shared.raft.lock().unwrap();
-            raft.update_commit_index(std::cmp::min(
-                args.leader_commit as usize,
-                last_log_index
-            ));
+            raft.update_commit_index(std::cmp::min(args.leader_commit as usize, last_log_index));
         }
         debug!("{:?} <- accept {:?}", shared, args);
         Ok(AppendEntriesReply {
@@ -1325,4 +1287,3 @@ async fn handle_current_state(shared: Arc<SharedRaft>, mut events_listener: Rece
         }
     }
 }
-
