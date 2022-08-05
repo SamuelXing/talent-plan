@@ -21,9 +21,9 @@ lazy_static! {
     static ref RUNTIME: Runtime = Runtime::new().unwrap();
 }
 
-const HEARTBEAT_TIMEOUT: Duration = Duration::from_millis(500);
-const MIN_ELECTION_TIMEOUT: Duration = Duration::from_millis(650);
-const MAX_ELECTION_TIMEOUT: Duration = Duration::from_millis(950);
+const HEARTBEAT_TIMEOUT: Duration = Duration::from_millis(50);
+const MIN_ELECTION_TIMEOUT: Duration = Duration::from_millis(150);
+const MAX_ELECTION_TIMEOUT: Duration = Duration::from_millis(300);
 
 #[cfg(test)]
 pub mod config;
@@ -53,7 +53,7 @@ pub enum ApplyMsg {
 
 // #[derive(Eq, PartialEq, Clone)]
 enum Event {
-    RecvAppendEntriesReq,
+    RecvAppendEntriesReq(u64, u64),
     BroadcastEntries,
     SendEntries(usize),
     RecvRequestVoteResp(usize, Result<RequestVoteReply>),
@@ -64,7 +64,11 @@ enum Event {
 impl fmt::Debug for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Event::RecvAppendEntriesReq => write!(f, "Event::RecvAppendEntriesReq"),
+            Event::RecvAppendEntriesReq(leader_term, leader_id) => write!(
+                f,
+                "Event::RecvAppendEntriesReq({},{})",
+                leader_term, leader_id
+            ),
             Event::BroadcastEntries => write!(f, "Event::BroadcastEntries"),
             Event::SendEntries(peer_id) => write!(f, "Event::SendEntries({})", peer_id),
             Event::RecvRequestVoteResp(peer_id, response) => {
@@ -143,7 +147,7 @@ pub struct State {
     pub current_term: u64,
     /// Who the last vote was cast for.
     pub voted_for: Option<u64>,
-    // TODO: start index
+
     /// entries this Replica is aware of.
     pub log: Vec<LogEntry>,
 
@@ -326,6 +330,17 @@ impl Raft {
                     Some(state.voted_for.parse().unwrap())
                 };
                 self.state.log = state.log.iter().cloned().map(Into::into).collect();
+                // apply snapshot
+                if self.state.index_offset != 0 {
+                    self.apply_ch
+                        .unbounded_send(ApplyMsg::Snapshot {
+                            data: self.persister.snapshot(),
+                            index: self.state.index_offset as u64,
+                            term: self.state.log[self.state.index_offset].term,
+                        })
+                        .unwrap();
+                    self.state.last_applied = self.state.index_offset;
+                }
             }
             Err(e) => {
                 panic!("{:?}", e);
@@ -452,6 +467,11 @@ impl SharedRaft {
             convert2follower: Notify::new(),
             events_emitter,
         }
+    }
+
+    fn persist(&self) {
+        let raft = &mut self.raft.lock().unwrap();
+        raft.persist();
     }
 
     /// The current term of this peer.
@@ -617,11 +637,14 @@ impl SharedRaft {
             reason,
             new_term,
             new_role,
-            voted_for.as_ref().unwrap()
+            voted_for
+                .as_ref()
+                .map_or("null".to_string(), |v| v.to_string())
         );
         raft.state.current_term = new_term;
         raft.role = new_role;
         raft.state.voted_for = voted_for;
+        raft.persist();
     }
 
     fn get_next_election_deadline(&self) -> Instant {
@@ -861,10 +884,11 @@ impl SharedRaft {
           },
           // received heartbeat, reset election timer
           Some(event) = events_listener.recv() => {
-            if matches!(event, Event::RecvAppendEntriesReq) {
+            if matches!(event, Event::RecvAppendEntriesReq(_, _)) {
                 self.update_next_election_deadline();
             }
           },
+          _ = self.convert2follower.notified() => {},
           else => (),
         }
     }
@@ -881,28 +905,29 @@ impl SharedRaft {
         'candidate: loop {
             tokio::select! {
               Some(event) = events_listener.recv() => {
-                let (peer_id, reply) = match event {
-                    Event::RecvRequestVoteResp(peer_id, reply) => (peer_id, reply),
-                    _  => continue,
+                match event {
+                    Event::RecvRequestVoteResp(peer_id, reply) => {
+                        if reply.is_err() {
+                            continue 'candidate;
+                        }
+                        let RequestVoteReply {msg_type: _, term, vote_granted} = reply.unwrap();
+                        // If RPC response contains term T > currentTerm:
+                        // set currentTerm = T, convert to follower
+                        if term > self.get_current_term() {
+                            self.update_role(Role::Follower, term, Some(peer_id as u64), "higher term (->RV)");
+                            break 'candidate;
+                        }
+                        if vote_granted {
+                            vote_count += 1;
+                        }
+                        // If votes received from majority of servers: become leader
+                        if vote_count >= (self.get_peers_len() + 1)/2 {
+                            self.update_role(Role::Leader, self.get_current_term(), Some(self.get_self_id()), "win election");
+                            break 'candidate;
+                        }
+                    },
+                    _  => continue 'candidate,
                 };
-                if reply.is_err() {
-                    continue;
-                }
-                let RequestVoteReply {msg_type: _, term, vote_granted} = reply.unwrap();
-                // If RPC response contains term T > currentTerm:
-                // set currentTerm = T, convert to follower
-                if term > self.get_current_term() {
-                    self.update_role(Role::Follower, term, Some(peer_id as u64), "higher term (->RV)");
-                    break 'candidate;
-                }
-                if vote_granted {
-                    vote_count += 1;
-                }
-                // If votes received from majority of servers: become leader
-                if vote_count >= (self.get_peers_len() + 1)/2 {
-                    self.update_role(Role::Leader, self.get_current_term(), Some(self.get_self_id()), "win election");
-                    break 'candidate;
-                }
               },
               // If election timeout elapses: start new election
               // Start new election by just breaking the loop; Stay in Role::Candidate
@@ -910,8 +935,13 @@ impl SharedRaft {
                 self.update_role(Role::Candidate, self.get_current_term() + 1, Some(self.get_self_id()), "election timeout");
                 break 'candidate;
               },
-              // If AppendEntries RPC received from new leader: convert to follower
-              _ = self.convert2follower.notified() => break 'candidate,
+              // If RPC request or response contains term T > currentTerm:
+              // set currentTerm = T, convert to follower (§5.1)
+              _ = self.convert2follower.notified() => {
+                if self.get_role() == Role::Follower {
+                    break 'candidate;
+                }
+              },
               else => continue,
             }
         }
@@ -946,7 +976,11 @@ impl SharedRaft {
                         _ => (),
                     }
                 },
-                _ = self.convert2follower.notified() => break,
+                _ = self.convert2follower.notified() => {
+                    if self.get_role() == Role::Follower {
+                        break;
+                    }
+                },
                 else => continue,
             };
         }
@@ -1041,7 +1075,7 @@ impl RaftService for Node {
     async fn request_vote(&self, args: RequestVoteArgs) -> labrpc::Result<RequestVoteReply> {
         let current_term = self.get_current_term();
 
-        // Do not vote for Replicas that are behind.
+        // Do not vote for Replicas that are left behind.
         if args.term < current_term {
             debug!("{:?} <- deny(lower term) {:?}", self.shared, args);
             return Ok(RequestVoteReply {
@@ -1053,12 +1087,8 @@ impl RaftService for Node {
         // If RPC request contains term T > currentTerm:
         // set currentTerm = T, convert to follower
         if args.term > current_term {
-            self.shared.update_role(
-                Role::Follower,
-                args.term,
-                Some(args.candidate_id),
-                "higher term (<-RV)",
-            );
+            self.shared
+                .update_role(Role::Follower, args.term, None, "higher term (<-RV)");
             self.shared.update_next_election_deadline();
             self.shared.convert2follower.notify_one();
         }
@@ -1081,6 +1111,8 @@ impl RaftService for Node {
         } else {
             false
         };
+
+        self.shared.persist();
         debug!(
             "{:?} <- {} {:?}",
             self.shared,
@@ -1098,12 +1130,14 @@ impl RaftService for Node {
         })
     }
 
-    // TODO: remove shared
     async fn append_entries(&self, args: AppendEntriesArgs) -> labrpc::Result<AppendEntriesReply> {
-        // notify backgroung task that an append_entries rpc arrived, for Heartbeat
-        let _ = self.shared.events_emitter.send(Event::RecvAppendEntriesReq);
-        let shared = &self.shared;
+        // notify background task that an append_entries rpc arrived, for Heartbeat
+        let _ = self
+            .shared
+            .events_emitter
+            .send(Event::RecvAppendEntriesReq(args.term, args.leader_id));
 
+        let shared = &self.shared;
         let current_term = shared.get_current_term();
         // Reply false if term < currentTerm
         if args.term < current_term {
@@ -1116,17 +1150,18 @@ impl RaftService for Node {
                 conflict_term: 0,
             });
         }
-        // If RPC request contains term T > currentTerm:
-        // set currentTerm = T, convert to follower
-        if args.term > current_term {
-            self.shared.update_role(
+        // convert to follower:
+        // * If RPC request contains term T > currentTerm, set currentTerm = T;
+        // * If AppendEntries RPC received from new leader
+        if args.term > current_term || Some(args.leader_id) != shared.get_voted_for() {
+            shared.update_role(
                 Role::Follower,
                 args.term,
                 Some(args.leader_id),
                 "higher term (<-AE)",
             );
-            self.shared.update_next_election_deadline();
-            self.shared.convert2follower.notify_one();
+            shared.update_next_election_deadline();
+            shared.convert2follower.notify_one();
         }
 
         // In raft paper: Reply false if log doesn’t contain an entry at prevLogIndex
@@ -1186,6 +1221,8 @@ impl RaftService for Node {
             let raft = &mut shared.raft.lock().unwrap();
             raft.update_commit_index(std::cmp::min(args.leader_commit as usize, last_log_index));
         }
+
+        self.shared.persist();
         debug!("{:?} <- accept {:?}", shared, args);
         Ok(AppendEntriesReply {
             msg_type: MessageType::AppendResponse as i32,
@@ -1201,8 +1238,11 @@ impl RaftService for Node {
         args: InstallSnapshotArgs,
     ) -> labrpc::Result<InstallSnapshotReply> {
         debug!("{:?} <- {:?}", self.shared, args);
-        // notify backgroung task that an install_snapshot rpc arrived, for Heartbeat
-        let _ = self.shared.events_emitter.send(Event::RecvAppendEntriesReq);
+        // notify background task that an install_snapshot rpc arrived, for Heartbeat
+        let _ = self
+            .shared
+            .events_emitter
+            .send(Event::RecvAppendEntriesReq(args.term, args.leader_id));
 
         let current_term = self.shared.get_current_term();
         // Reply immediately if leader's term < currentTerm
@@ -1212,9 +1252,10 @@ impl RaftService for Node {
                 term: current_term,
             });
         }
-        // If RPC request contains term T > currentTerm:
-        // set currentTerm = T, convert to follower
-        if args.term > current_term {
+        // convert to follower:
+        // * If RPC request contains term T > currentTerm, set currentTerm = T;
+        // * If AppendEntries RPC received from new leader
+        if args.term > current_term || Some(args.leader_id) != self.shared.get_voted_for() {
             self.shared.update_role(
                 Role::Follower,
                 args.term,
